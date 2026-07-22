@@ -26,7 +26,8 @@ import * as recipeScaler from './commands/recipeScaler.js';
 import * as pantryManager from './commands/pantryManager.js';
 import * as youtubeFeed from './commands/youtubeFeed.js';
 import * as testAlerts from './commands/testAlerts.js';
-import { initLiveNotifier } from './liveNotifier.js';
+import { initLiveNotifier, notifierStatus } from './liveNotifier.js';
+import { getDashboardHtml } from './dashboard.js';
 
 dotenv.config();
 
@@ -177,13 +178,25 @@ if (!token) {
   });
 }
 
-// Start a dummy HTTP server to satisfy Render's port check for Web Services
+// Start a Web Status Dashboard HTTP server
 const port = process.env.PORT || 10000;
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bot is online!');
+  if (req.url === '/api/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      uptime: process.uptime(),
+      ping: client.ws.ping,
+      guilds: client.guilds.cache.size,
+      channels: client.channels.cache.size,
+      status: notifierStatus
+    }, null, 2));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    const html = getDashboardHtml(client, notifierStatus);
+    res.end(html);
+  }
 }).listen(port, () => {
-  console.log(`📡 Dummy web server listening on port ${port} to satisfy Render health checks.`);
+  console.log(`📡 Status Dashboard web server listening on port ${port}.`);
   
   // Self-ping to prevent Render free tier from going to sleep
   const externalUrl = process.env.RENDER_EXTERNAL_URL;
@@ -191,7 +204,7 @@ http.createServer((req, res) => {
     console.log(`Self-pinging configured for: ${externalUrl}`);
     setInterval(() => {
       fetch(externalUrl)
-        .then(() => console.log('Pinged self to stay awake.'))
+        .then(() => {}) // Silence logging to keep logs clean on self-ping
         .catch(err => console.error('Self-ping error:', err.message));
     }, 10 * 60 * 1000); // Every 10 minutes
   }

@@ -1,6 +1,21 @@
 import { EmbedBuilder, ActivityType } from 'discord.js';
 import { ProxyAgent } from 'undici';
 
+// Global Status State for Dashboard
+export const notifierStatus = {
+  startedAt: new Date(),
+  lastCheckTime: null,
+  youtube: {
+    channelId: 'UCoucrMB6GaRfylW0zi07nAw',
+    isLive: false,
+    lastVideoId: null,
+    lastCheckStatus: 'Initialized',
+    useApi: false
+  },
+  tiktok: {}, // username -> statusObject
+  logs: []
+};
+
 // Cache for states to prevent duplicate notifications
 let lastYtVideoId = null;
 let ytIsLive = false;
@@ -15,6 +30,26 @@ const tiktokAvatars = new Map(); // username -> avatarUrl
 const YT_CHANNEL_ID = 'UCoucrMB6GaRfylW0zi07nAw';
 const TIKTOK_CHANNELS = ['nola_chef', 'munchy_munchdowns', 'michaelmoore286'];
 
+// Seed initial TikTok states
+for (const username of TIKTOK_CHANNELS) {
+  notifierStatus.tiktok[username] = {
+    username,
+    isLive: false,
+    lastVideoId: null,
+    lastCheckStatus: 'Initialized',
+    avatarUrl: null
+  };
+}
+
+// Helper to write logs to the dashboard state
+function addStatusLog(message) {
+  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+  notifierStatus.logs.push(`[${timestamp}] ${message}`);
+  if (notifierStatus.logs.length > 15) {
+    notifierStatus.logs.shift();
+  }
+}
+
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -27,8 +62,10 @@ if (process.env.TIKTOK_PROXY) {
   try {
     proxyAgent = new ProxyAgent(process.env.TIKTOK_PROXY);
     console.log('🔄 TikTok proxy configured successfully.');
+    addStatusLog('🔄 TikTok proxy configured successfully.');
   } catch (err) {
     console.error('❌ Failed to initialize TikTok proxy:', err.message);
+    addStatusLog(`❌ Failed to initialize TikTok proxy: ${err.message}`);
   }
 }
 
@@ -52,6 +89,7 @@ async function fetchChannelById(client, channelId, platformName) {
       channel = await client.channels.fetch(channelId);
     } catch (err) {
       console.warn(`⚠️ Failed to fetch ${platformName} alerts channel (${channelId}):`, err.message);
+      addStatusLog(`⚠️ Failed to fetch ${platformName} alerts channel: ${err.message}`);
     }
   }
   
@@ -68,6 +106,7 @@ async function fetchChannelById(client, channelId, platformName) {
     console.log(`📢 ${platformName} alerts channel resolved to: #${channel.name} (Guild: ${channel.guild?.name || 'DM / Unknown'})`);
   } else {
     console.warn(`⚠️ No text channel found to post ${platformName} notifications.`);
+    addStatusLog(`⚠️ No text channel found to post ${platformName} notifications.`);
   }
   
   return channel;
@@ -147,6 +186,7 @@ function stopRotation() {
 async function checkYouTubeLive(client, channel) {
   try {
     const apiKey = process.env.YOUTUBE_API_KEY;
+    notifierStatus.youtube.useApi = !!apiKey;
     
     if (apiKey) {
       // Use official YouTube API
@@ -154,12 +194,17 @@ async function checkYouTubeLive(client, channel) {
       const res = await fetch(apiUrl);
       if (!res.ok) {
         console.warn(`⚠️ YouTube Live API check failed: HTTP status ${res.status}. Falling back to scraper.`);
+        addStatusLog(`⚠️ YouTube Live API check failed: HTTP ${res.status}. Falling back to scraper.`);
+        notifierStatus.youtube.lastCheckStatus = `API Error (HTTP ${res.status})`;
         await checkYouTubeLiveScraper(client, channel);
         return;
       }
       const data = await res.json();
       const items = data.items || [];
       const isLive = items.length > 0;
+      
+      notifierStatus.youtube.isLive = isLive;
+      notifierStatus.youtube.lastCheckStatus = 'OK (API)';
       
       if (isLive && !ytIsLive) {
         ytIsLive = true;
@@ -169,6 +214,7 @@ async function checkYouTubeLive(client, channel) {
         const title = liveVideo.snippet.title;
         const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
         console.log(`📢 YouTube Channel is LIVE via API! URL: ${videoUrl}`);
+        addStatusLog(`📢 YouTube is LIVE: "${title}"`);
         
         const mention = getMentionPrefix();
         const embed = new EmbedBuilder()
@@ -183,11 +229,15 @@ async function checkYouTubeLive(client, channel) {
         await channel.send({ 
           content: `📢 **Chef Chris Cody** is LIVE on YouTube! ${mention}\n${videoUrl}`, 
           embeds: [embed] 
-        }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
+        }).catch((err) => {
+          console.error('❌ Failed to send YouTube live alert to Discord:', err);
+          addStatusLog(`❌ Failed to send YouTube live alert: ${err.message}`);
+        });
       } else if (!isLive && ytIsLive) {
         ytIsLive = false;
         updateBotActivity(client);
         console.log('🔴 YouTube Live stream ended (detected via API).');
+        addStatusLog('🔴 YouTube Live stream ended.');
       }
     } else {
       // No API key configured, use scraper
@@ -195,6 +245,8 @@ async function checkYouTubeLive(client, channel) {
     }
   } catch (err) {
     console.error('Error checking YouTube Live:', err.message);
+    addStatusLog(`❌ YouTube Live check error: ${err.message}`);
+    notifierStatus.youtube.lastCheckStatus = `Error: ${err.message}`;
   }
 }
 
@@ -207,10 +259,14 @@ async function checkYouTubeLiveScraper(client, channel) {
   
   if (!res.ok) {
     console.warn(`⚠️ YouTube Live Scraper check failed: HTTP status ${res.status}`);
+    addStatusLog(`⚠️ YouTube Live Scraper failed: HTTP ${res.status}`);
+    notifierStatus.youtube.lastCheckStatus = `Scraper Error (HTTP ${res.status})`;
     return;
   }
   
   const isLive = res.url.includes('/watch?v=') || res.url.includes('/v/');
+  notifierStatus.youtube.isLive = isLive;
+  notifierStatus.youtube.lastCheckStatus = 'OK (Scraper)';
   
   if (isLive && !ytIsLive) {
     ytIsLive = true;
@@ -220,6 +276,7 @@ async function checkYouTubeLiveScraper(client, channel) {
     const text = await res.text();
     const titleMatch = /<meta name="title" content="([^"]+)"/i.exec(text) || /<title>([^<]+)<\/title>/i.exec(text);
     const title = titleMatch ? titleMatch[1] : 'Chef Chris Cody is LIVE on YouTube!';
+    addStatusLog(`📢 YouTube is LIVE (Scraper): "${title}"`);
 
     const mention = getMentionPrefix();
     const embed = new EmbedBuilder()
@@ -234,11 +291,15 @@ async function checkYouTubeLiveScraper(client, channel) {
     await channel.send({ 
       content: `📢 **Chef Chris Cody** is LIVE on YouTube! ${mention}\n${res.url}`, 
       embeds: [embed] 
-    }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
+    }).catch((err) => {
+      console.error('❌ Failed to send YouTube live alert to Discord:', err);
+      addStatusLog(`❌ Failed to send YouTube live alert: ${err.message}`);
+    });
   } else if (!isLive && ytIsLive) {
     ytIsLive = false;
     updateBotActivity(client);
     console.log('🔴 YouTube Live stream ended (detected via scraper).');
+    addStatusLog('🔴 YouTube Live stream ended.');
   }
 }
 
@@ -248,6 +309,7 @@ async function checkYouTubeUploads(client, channel) {
     const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${YT_CHANNEL_ID}`, { headers: HEADERS });
     if (!res.ok) {
       console.warn(`⚠️ YouTube Upload RSS check failed: HTTP status ${res.status}`);
+      addStatusLog(`⚠️ YouTube RSS Feed check failed: HTTP ${res.status}`);
       return;
     }
     const xml = await res.text();
@@ -260,8 +322,11 @@ async function checkYouTubeUploads(client, channel) {
       const title = match[2];
       const link = match[3];
 
+      notifierStatus.youtube.lastVideoId = videoId;
+
       if (lastYtVideoId && lastYtVideoId !== videoId) {
         console.log(`📢 New YouTube video detected: ${title}`);
+        addStatusLog(`🎥 New YouTube video uploaded: "${title}"`);
         
         const mention = getMentionPrefix();
         const embed = new EmbedBuilder()
@@ -273,12 +338,16 @@ async function checkYouTubeUploads(client, channel) {
           .setFooter({ text: 'Chef Chris Cody\'s Kitchen YouTube' })
           .setTimestamp();
 
-        await channel.send({ content: `🔔 **New Video Alert!** Chef Chris Cody has posted a new video! ${mention}\n${link}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send YouTube upload alert to Discord:', err));
+        await channel.send({ content: `🔔 **New Video Alert!** Chef Chris Cody has posted a new video! ${mention}\n${link}`, embeds: [embed] }).catch((err) => {
+          console.error('❌ Failed to send YouTube upload alert to Discord:', err);
+          addStatusLog(`❌ Failed to send YouTube upload alert: ${err.message}`);
+        });
       }
       lastYtVideoId = videoId;
     }
   } catch (err) {
     console.error('Error checking YouTube uploads:', err.message);
+    addStatusLog(`❌ YouTube Upload check error: ${err.message}`);
   }
 }
 
@@ -342,6 +411,7 @@ function parseTikTokAvatar(html, username) {
       const avatar = data.LiveRoom?.liveRoomUserInfo?.user?.avatarThumb;
       if (avatar) {
         tiktokAvatars.set(username, avatar);
+        notifierStatus.tiktok[username].avatarUrl = avatar;
         return;
       }
     } catch (e) {}
@@ -364,6 +434,7 @@ function parseTikTokAvatar(html, username) {
       const userObj = findField(data, 'liveRoomUserInfo')?.user || findField(data, 'userInfo')?.user;
       if (userObj && userObj.avatarThumb) {
         tiktokAvatars.set(username, userObj.avatarThumb);
+        notifierStatus.tiktok[username].avatarUrl = userObj.avatarThumb;
       }
     } catch (e) {}
   }
@@ -376,16 +447,22 @@ async function checkTikTokChannel(client, channel, username) {
     const liveRes = await fetchWithProxy(`https://www.tiktok.com/@${username}/live`);
     if (!liveRes.ok) {
       console.warn(`⚠️ TikTok Live Check for @${username} failed: HTTP status ${liveRes.status}`);
+      addStatusLog(`⚠️ TikTok Live check for @${username} failed: HTTP ${liveRes.status}`);
+      notifierStatus.tiktok[username].lastCheckStatus = `Live Error (HTTP ${liveRes.status})`;
     } else {
       const liveText = await liveRes.text();
       parseTikTokAvatar(liveText, username);
       const isLive = isTikTokLive(liveText);
       const wasLive = tiktokLiveStates.get(username) || false;
 
+      notifierStatus.tiktok[username].isLive = isLive;
+      notifierStatus.tiktok[username].lastCheckStatus = 'OK';
+
       if (isLive && !wasLive) {
         tiktokLiveStates.set(username, true);
         updateBotActivity(client);
         console.log(`📢 TikTok user @${username} is LIVE!`);
+        addStatusLog(`📢 TikTok creator @${username} went LIVE!`);
         
         const mention = getMentionPrefix();
         const avatarUrl = tiktokAvatars.get(username) || 'https://raw.githubusercontent.com/discordjs/guide/main/guide/assets/images/discord-logo-blue.svg';
@@ -399,11 +476,15 @@ async function checkTikTokChannel(client, channel, username) {
           .setFooter({ text: 'TikTok Live Alert' })
           .setTimestamp();
 
-        await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! ${mention}\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send TikTok live alert to Discord:', err));
+        await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! ${mention}\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch((err) => {
+          console.error('❌ Failed to send TikTok live alert to Discord:', err);
+          addStatusLog(`❌ Failed to send TikTok live alert: ${err.message}`);
+        });
       } else if (!isLive && wasLive) {
         tiktokLiveStates.set(username, false);
         updateBotActivity(client);
         console.log(`🔴 TikTok user @${username} live stream ended.`);
+        addStatusLog(`🔴 TikTok stream for @${username} ended.`);
       }
     }
 
@@ -411,6 +492,7 @@ async function checkTikTokChannel(client, channel, username) {
     const profileRes = await fetchWithProxy(`https://www.tiktok.com/@${username}`);
     if (!profileRes.ok) {
       console.warn(`⚠️ TikTok Profile Check for @${username} failed: HTTP status ${profileRes.status}`);
+      addStatusLog(`⚠️ TikTok Profile check for @${username} failed: HTTP ${profileRes.status}`);
       return;
     }
     const profileText = await profileRes.text();
@@ -424,8 +506,11 @@ async function checkTikTokChannel(client, channel, username) {
       const videoLink = `https://www.tiktok.com/@${username}/video/${videoId}`;
       const lastVideoId = tiktokLastVideoIds.get(username);
       
+      notifierStatus.tiktok[username].lastVideoId = videoId;
+      
       if (lastVideoId && lastVideoId !== videoId) {
         console.log(`📢 New TikTok video from @${username}: ${videoId}`);
+        addStatusLog(`📱 New TikTok upload from @${username}`);
         
         const mention = getMentionPrefix();
         const avatarUrl = tiktokAvatars.get(username) || 'https://raw.githubusercontent.com/discordjs/guide/main/guide/assets/images/discord-logo-blue.svg';
@@ -439,7 +524,10 @@ async function checkTikTokChannel(client, channel, username) {
           .setFooter({ text: 'TikTok Upload Alert' })
           .setTimestamp();
 
-        await channel.send({ content: `🔔 **New TikTok Post!** Check out the latest video from **@${username}**! ${mention}\n${videoLink}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send TikTok upload alert to Discord:', err));
+        await channel.send({ content: `🔔 **New TikTok Post!** Check out the latest video from **@${username}**! ${mention}\n${videoLink}`, embeds: [embed] }).catch((err) => {
+          console.error('❌ Failed to send TikTok upload alert to Discord:', err);
+          addStatusLog(`❌ Failed to send TikTok upload alert: ${err.message}`);
+        });
       }
       tiktokLastVideoIds.set(username, videoId);
     } else {
@@ -447,6 +535,7 @@ async function checkTikTokChannel(client, channel, username) {
     }
   } catch (err) {
     console.error(`Error checking TikTok for @${username}:`, err.message);
+    addStatusLog(`❌ TikTok check error for @${username}: ${err.message}`);
   }
 }
 
@@ -459,11 +548,13 @@ async function seedNotifierCache() {
     const ytRes = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${YT_CHANNEL_ID}`, { headers: HEADERS });
     if (!ytRes.ok) {
       console.warn(`⚠️ Failed to seed YouTube cache: HTTP status ${ytRes.status}`);
+      addStatusLog(`⚠️ Failed to seed YouTube RSS cache: HTTP ${ytRes.status}`);
     } else {
       const ytXml = await ytRes.text();
       const ytMatch = /<yt:videoId>([^<]+)<\/yt:videoId>/i.exec(ytXml);
       if (ytMatch) {
         lastYtVideoId = ytMatch[1];
+        notifierStatus.youtube.lastVideoId = lastYtVideoId;
       }
     }
     
@@ -476,6 +567,7 @@ async function seedNotifierCache() {
           if (data.items && data.items.length > 0) {
             ytChannelAvatarUrl = data.items[0].snippet.thumbnails.default.url;
             console.log('✅ YouTube channel avatar loaded successfully.');
+            addStatusLog('✅ YouTube channel avatar loaded.');
           }
         }
       } catch (err) {
@@ -488,6 +580,7 @@ async function seedNotifierCache() {
       const ttRes = await fetchWithProxy(`https://www.tiktok.com/@${username}`);
       if (!ttRes.ok) {
         console.warn(`⚠️ Failed to seed TikTok cache for @${username}: HTTP status ${ttRes.status}`);
+        addStatusLog(`⚠️ Failed to seed TikTok cache for @${username}: HTTP ${ttRes.status}`);
         continue;
       }
       const ttText = await ttRes.text();
@@ -495,13 +588,16 @@ async function seedNotifierCache() {
       const ttMatch = /"url":"https:\/\/www\.tiktok\.com\/@[^"]+?\/video\/(\d+)"/i.exec(ttText);
       if (ttMatch) {
         tiktokLastVideoIds.set(username, ttMatch[1]);
+        notifierStatus.tiktok[username].lastVideoId = ttMatch[1];
       } else {
         console.warn(`⚠️ Could not find video URL to seed cache for TikTok user @${username}.`);
       }
     }
     console.log('🚀 Live Notifier Cache seeding complete.');
+    addStatusLog('🚀 Cache seeding complete.');
   } catch (err) {
     console.error('Failed to seed live notifier cache:', err.message);
+    addStatusLog(`❌ Failed to seed cache: ${err.message}`);
   }
 }
 
@@ -513,12 +609,14 @@ export async function initLiveNotifier(client) {
   // Set up checking interval: defaults to 1 minute (60,000 ms) or customized via env
   const INTERVAL_MS = process.env.LIVE_CHECK_INTERVAL_MS ? parseInt(process.env.LIVE_CHECK_INTERVAL_MS) : 60000;
   console.log(`⏳ Live updates check interval configured to: ${INTERVAL_MS / 1000} seconds.`);
+  addStatusLog(`⏳ Interval set to ${INTERVAL_MS / 1000}s`);
   
   // Initialize bot activity status
   updateBotActivity(client);
 
   async function runChecks() {
     console.log('⏳ Running YouTube and TikTok live updates check...');
+    notifierStatus.lastCheckTime = new Date();
     
     // Fetch channels independently to support separate alert channels
     const ytChannel = await getYouTubeChannel(client);
