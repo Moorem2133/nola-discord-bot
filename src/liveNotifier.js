@@ -102,6 +102,55 @@ async function checkYouTubeUploads(client, channel) {
   }
 }
 
+// Helper to check if a TikTok user is live using JSON state parsing and fallback regex
+function isTikTokLive(html) {
+  // Try SIGI_STATE first
+  const sigiMatch = /<script id="SIGI_STATE" type="application\/json">([\s\S]*?)<\/script>/i.exec(html);
+  if (sigiMatch) {
+    try {
+      const data = JSON.parse(sigiMatch[1]);
+      const status = data.LiveRoom?.liveRoomUserInfo?.liveRoom?.status;
+      if (status === 2) return true;
+      if (status === 4) return false;
+    } catch (e) {
+      console.error('Error parsing SIGI_STATE JSON:', e.message);
+    }
+  }
+
+  // Try __UNIVERSAL_DATA_FOR_REHYDRATION__
+  const universalMatch = /<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application\/json">([\s\S]*?)<\/script>/i.exec(html);
+  if (universalMatch) {
+    try {
+      const data = JSON.parse(universalMatch[1]);
+      const findField = (obj, field) => {
+        let found = null;
+        const search = (o) => {
+          if (found !== null || !o || typeof o !== 'object') return;
+          if (o[field] !== undefined) { found = o[field]; return; }
+          for (const k in o) search(o[k]);
+        };
+        search(obj);
+        return found;
+      };
+      const info = findField(data, 'liveRoomUserInfo');
+      if (info && info.liveRoom && info.liveRoom.status === 2) return true;
+    } catch (e) {
+      console.error('Error parsing UNIVERSAL_DATA JSON:', e.message);
+    }
+  }
+
+  // Fallback regexes
+  const roomStatus = /"roomStatus":\s*2/i.exec(html);
+  const liveStatusRegex = /"liveRoomUserInfo":{[\s\S]*?"status":\s*2\b/i.exec(html);
+  const isOffline = html.includes('"status":4') || html.includes('"roomStatus":4');
+  
+  if (roomStatus || liveStatusRegex) {
+    return !isOffline;
+  }
+  
+  return false;
+}
+
 // 3. TikTok Live & Upload Check
 async function checkTikTokChannel(client, channel, username) {
   try {
@@ -109,11 +158,7 @@ async function checkTikTokChannel(client, channel, username) {
     const liveRes = await fetch(`https://www.tiktok.com/@${username}/live`, { headers: HEADERS });
     const liveText = await liveRes.text();
     
-    // Check if the source contains a room ID and doesn't state no live
-    const hasRoomId = /"roomId":"(\d{15,22})"/i.exec(liveText);
-    const roomStatus = /"roomStatus":\s*2/i.exec(liveText); // status 2 is active live
-    
-    const isLive = !!(hasRoomId || roomStatus) && !liveText.includes('no_live') && !liveText.includes('No LIVE');
+    const isLive = isTikTokLive(liveText);
     const wasLive = tiktokLiveStates.get(username) || false;
 
     if (isLive && !wasLive) {
