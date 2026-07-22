@@ -8,7 +8,7 @@ const tiktokLastVideoIds = new Map(); // username -> lastVideoId
 const tiktokLiveStates = new Map(); // username -> isLive (boolean)
 
 const YT_CHANNEL_ID = 'UCoucrMB6GaRfylW0zi07nAw';
-const TIKTOK_CHANNELS = ['nola_chef', 'munchy_munchdowns'];
+const TIKTOK_CHANNELS = ['nola_chef', 'munchy_munchdowns', 'michaelmoore286'];
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
