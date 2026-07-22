@@ -37,7 +37,8 @@ export const data = new SlashCommandBuilder()
           .setRequired(true)
           .addChoices(
             { name: 'nola_chef', value: 'nola_chef' },
-            { name: 'munchy_munchdowns', value: 'munchy_munchdowns' }
+            { name: 'munchy_munchdowns', value: 'munchy_munchdowns' },
+            { name: 'michaelmoore286', value: 'michaelmoore286' }
           )
       )
   )
@@ -52,7 +53,8 @@ export const data = new SlashCommandBuilder()
           .setRequired(true)
           .addChoices(
             { name: 'nola_chef', value: 'nola_chef' },
-            { name: 'munchy_munchdowns', value: 'munchy_munchdowns' }
+            { name: 'munchy_munchdowns', value: 'munchy_munchdowns' },
+            { name: 'michaelmoore286', value: 'michaelmoore286' }
           )
       )
   );
