@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, Collection, ActivityType } from 'discord.js';
 import dotenv from 'dotenv';
+import http from 'http';
 
 import * as setupCategoryMod from './commands/setupCategoryMod.js';
 import * as modWizard from './commands/modWizard.js';
@@ -175,3 +176,12 @@ if (!token) {
     console.error('❌ Login failed:', err.message);
   });
 }
+
+// Start a dummy HTTP server to satisfy Render's port check for Web Services
+const port = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot is online!');
+}).listen(port, () => {
+  console.log(`📡 Dummy web server listening on port ${port} to satisfy Render health checks.`);
+});
