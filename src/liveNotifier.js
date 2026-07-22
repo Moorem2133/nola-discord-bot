@@ -360,8 +360,9 @@ export async function initLiveNotifier(client) {
   // Seed initially
   await seedNotifierCache();
   
-  // Set up checking interval: 3 minutes (180,000 ms)
-  const INTERVAL_MS = 3 * 60 * 1000;
+  // Set up checking interval: defaults to 1 minute (60,000 ms) or customized via env
+  const INTERVAL_MS = process.env.LIVE_CHECK_INTERVAL_MS ? parseInt(process.env.LIVE_CHECK_INTERVAL_MS) : 60000;
+  console.log(`⏳ Live updates check interval configured to: ${INTERVAL_MS / 1000} seconds.`);
   
   async function runChecks() {
     const channel = await getAlertsChannel(client);
