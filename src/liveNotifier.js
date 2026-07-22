@@ -1,4 +1,5 @@
 import { EmbedBuilder } from 'discord.js';
+import { ProxyAgent } from 'undici';
 
 // Cache for states to prevent duplicate notifications
 let lastYtVideoId = null;
@@ -15,6 +16,29 @@ const HEADERS = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5'
 };
+
+// Initialize proxy agent if TIKTOK_PROXY is configured
+let proxyAgent = null;
+if (process.env.TIKTOK_PROXY) {
+  try {
+    proxyAgent = new ProxyAgent(process.env.TIKTOK_PROXY);
+    console.log('🔄 TikTok proxy configured successfully.');
+  } catch (err) {
+    console.error('❌ Failed to initialize TikTok proxy:', err.message);
+  }
+}
+
+// Fetch helper that automatically applies the proxy dispatcher
+async function fetchWithProxy(url, options = {}) {
+  const fetchOptions = {
+    headers: HEADERS,
+    ...options
+  };
+  if (proxyAgent) {
+    fetchOptions.dispatcher = proxyAgent;
+  }
+  return fetch(url, fetchOptions);
+}
 
 // Helper to get target channel for alerts
 async function getAlertsChannel(client) {
@@ -40,43 +64,93 @@ async function getAlertsChannel(client) {
 // 1. YouTube Live Check
 async function checkYouTubeLive(client, channel) {
   try {
-    const res = await fetch(`https://www.youtube.com/channel/${YT_CHANNEL_ID}/live`, { 
-      headers: HEADERS,
-      redirect: 'follow' 
-    });
+    const apiKey = process.env.YOUTUBE_API_KEY;
     
-    if (!res.ok) {
-      console.warn(`⚠️ YouTube Live Check failed: HTTP status ${res.status}`);
-      return;
-    }
-    
-    const isLive = res.url.includes('/watch?v=') || res.url.includes('/v/');
-    
-    if (isLive && !ytIsLive) {
-      ytIsLive = true;
-      console.log(`📢 YouTube Channel is LIVE! URL: ${res.url}`);
+    if (apiKey) {
+      // Use official YouTube API
+      const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${YT_CHANNEL_ID}&type=video&eventType=live&key=${apiKey}`;
+      const res = await fetch(apiUrl);
+      if (!res.ok) {
+        console.warn(`⚠️ YouTube Live API check failed: HTTP status ${res.status}. Falling back to scraper.`);
+        await checkYouTubeLiveScraper(client, channel);
+        return;
+      }
+      const data = await res.json();
+      const items = data.items || [];
+      const isLive = items.length > 0;
       
-      const text = await res.text();
-      // Extract title if possible
-      const titleMatch = /<meta name="title" content="([^"]+)"/i.exec(text) || /<title>([^<]+)<\/title>/i.exec(text);
-      const title = titleMatch ? titleMatch[1] : 'Chef Chris Cody is LIVE on YouTube!';
+      if (isLive && !ytIsLive) {
+        ytIsLive = true;
+        const liveVideo = items[0];
+        const videoId = liveVideo.id.videoId;
+        const title = liveVideo.snippet.title;
+        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        console.log(`📢 YouTube Channel is LIVE via API! URL: ${videoUrl}`);
+        
+        const embed = new EmbedBuilder()
+          .setTitle(`🔴 LIVE NOW: ${title}`)
+          .setURL(videoUrl)
+          .setColor('#ff0000')
+          .setDescription('Chef Chris Cody is streaming live! Join the stream and chat in real-time.')
+          .setThumbnail(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`)
+          .setFooter({ text: 'Chef Chris Cody\'s Kitchen Live Alert' })
+          .setTimestamp();
 
-      const embed = new EmbedBuilder()
-        .setTitle(`🔴 LIVE NOW: ${title}`)
-        .setURL(res.url)
-        .setColor('#ff0000')
-        .setDescription('Chef Chris Cody is streaming live! Join the stream and chat in real-time.')
-        .setThumbnail(`https://img.youtube.com/vi/live/hqdefault.jpg`)
-        .setFooter({ text: 'Chef Chris Cody\'s Kitchen Live Alert' })
-        .setTimestamp();
-
-      await channel.send({ content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${res.url}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
-    } else if (!isLive && ytIsLive) {
-      ytIsLive = false;
-      console.log('🔴 YouTube Live stream ended.');
+        await channel.send({ 
+          content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${videoUrl}`, 
+          embeds: [embed] 
+        }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
+      } else if (!isLive && ytIsLive) {
+        ytIsLive = false;
+        console.log('🔴 YouTube Live stream ended (detected via API).');
+      }
+    } else {
+      // No API key configured, use scraper
+      await checkYouTubeLiveScraper(client, channel);
     }
   } catch (err) {
     console.error('Error checking YouTube Live:', err.message);
+  }
+}
+
+// Scraper fallback helper
+async function checkYouTubeLiveScraper(client, channel) {
+  const res = await fetch(`https://www.youtube.com/channel/${YT_CHANNEL_ID}/live`, { 
+    headers: HEADERS,
+    redirect: 'follow' 
+  });
+  
+  if (!res.ok) {
+    console.warn(`⚠️ YouTube Live Scraper check failed: HTTP status ${res.status}`);
+    return;
+  }
+  
+  const isLive = res.url.includes('/watch?v=') || res.url.includes('/v/');
+  
+  if (isLive && !ytIsLive) {
+    ytIsLive = true;
+    console.log(`📢 YouTube Channel is LIVE via scraper! URL: ${res.url}`);
+    
+    const text = await res.text();
+    const titleMatch = /<meta name="title" content="([^"]+)"/i.exec(text) || /<title>([^<]+)<\/title>/i.exec(text);
+    const title = titleMatch ? titleMatch[1] : 'Chef Chris Cody is LIVE on YouTube!';
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🔴 LIVE NOW: ${title}`)
+      .setURL(res.url)
+      .setColor('#ff0000')
+      .setDescription('Chef Chris Cody is streaming live! Join the stream and chat in real-time.')
+      .setThumbnail(`https://img.youtube.com/vi/live/hqdefault.jpg`)
+      .setFooter({ text: 'Chef Chris Cody\'s Kitchen Live Alert' })
+      .setTimestamp();
+
+    await channel.send({ 
+      content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${res.url}`, 
+      embeds: [embed] 
+    }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
+  } else if (!isLive && ytIsLive) {
+    ytIsLive = false;
+    console.log('🔴 YouTube Live stream ended (detected via scraper).');
   }
 }
 
@@ -171,7 +245,7 @@ function isTikTokLive(html) {
 async function checkTikTokChannel(client, channel, username) {
   try {
     // A. Check LIVE status
-    const liveRes = await fetch(`https://www.tiktok.com/@${username}/live`, { headers: HEADERS });
+    const liveRes = await fetchWithProxy(`https://www.tiktok.com/@${username}/live`);
     if (!liveRes.ok) {
       console.warn(`⚠️ TikTok Live Check for @${username} failed: HTTP status ${liveRes.status}`);
     } else {
@@ -199,7 +273,7 @@ async function checkTikTokChannel(client, channel, username) {
     }
 
     // B. Check Upload status
-    const profileRes = await fetch(`https://www.tiktok.com/@${username}`, { headers: HEADERS });
+    const profileRes = await fetchWithProxy(`https://www.tiktok.com/@${username}`);
     if (!profileRes.ok) {
       console.warn(`⚠️ TikTok Profile Check for @${username} failed: HTTP status ${profileRes.status}`);
       return;
@@ -253,7 +327,7 @@ async function seedNotifierCache() {
     
     // Seed TikTok
     for (const username of TIKTOK_CHANNELS) {
-      const ttRes = await fetch(`https://www.tiktok.com/@${username}`, { headers: HEADERS });
+      const ttRes = await fetchWithProxy(`https://www.tiktok.com/@${username}`);
       if (!ttRes.ok) {
         console.warn(`⚠️ Failed to seed TikTok cache for @${username}: HTTP status ${ttRes.status}`);
         continue;
@@ -277,8 +351,8 @@ export async function initLiveNotifier(client) {
   // Seed initially
   await seedNotifierCache();
   
-  // Set up checking interval: 10 minutes (600,000 ms)
-  const INTERVAL_MS = 10 * 60 * 1000;
+  // Set up checking interval: 3 minutes (180,000 ms)
+  const INTERVAL_MS = 3 * 60 * 1000;
   
   async function runChecks() {
     const channel = await getAlertsChannel(client);
