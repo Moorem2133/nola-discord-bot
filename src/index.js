@@ -184,4 +184,15 @@ http.createServer((req, res) => {
   res.end('Bot is online!');
 }).listen(port, () => {
   console.log(`📡 Dummy web server listening on port ${port} to satisfy Render health checks.`);
+  
+  // Self-ping to prevent Render free tier from going to sleep
+  const externalUrl = process.env.RENDER_EXTERNAL_URL;
+  if (externalUrl) {
+    console.log(`Self-pinging configured for: ${externalUrl}`);
+    setInterval(() => {
+      fetch(externalUrl)
+        .then(() => console.log('Pinged self to stay awake.'))
+        .catch(err => console.error('Self-ping error:', err.message));
+    }, 10 * 60 * 1000); // Every 10 minutes
+  }
 });
