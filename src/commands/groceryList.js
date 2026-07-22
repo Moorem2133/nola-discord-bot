@@ -6,8 +6,10 @@ import {
   ButtonStyle 
 } from 'discord.js';
 
-// In-memory grocery list store: userId -> array of { item: string, checked: boolean }
-const groceryStore = new Map();
+import { db } from '../db.js';
+
+// Helper to load grocery store data from DB
+const getGroceryStore = () => db.get('groceryStore', {});
 
 export const data = new SlashCommandBuilder()
   .setName('grocery')
@@ -33,12 +35,14 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
   const subcommand = interaction.options.getSubcommand();
   const userId = interaction.user.id;
-  const list = groceryStore.get(userId) || [];
+  const groceryStore = getGroceryStore();
+  const list = groceryStore[userId] || [];
 
   if (subcommand === 'add') {
     const itemText = interaction.options.getString('item');
     list.push({ item: itemText, checked: false });
-    groceryStore.set(userId, list);
+    groceryStore[userId] = list;
+    db.set('groceryStore', groceryStore);
 
     const embed = new EmbedBuilder()
       .setTitle('🛒 Added to Grocery List')
@@ -82,7 +86,8 @@ export async function execute(interaction) {
       const idx = parseInt(i.customId.replace('grocery_toggle_', ''), 10);
       if (list[idx]) {
         list[idx].checked = !list[idx].checked;
-        groceryStore.set(userId, list);
+        groceryStore[userId] = list;
+        db.set('groceryStore', groceryStore);
       }
 
       const newButtons = list.slice(0, 5).map((item, index) =>
@@ -102,11 +107,13 @@ export async function execute(interaction) {
     const clearAll = interaction.options.getBoolean('clear_all');
 
     if (clearAll) {
-      groceryStore.set(userId, []);
+      groceryStore[userId] = [];
+      db.set('groceryStore', groceryStore);
       await interaction.reply({ content: '🧹 Cleared **all items** from your grocery list.', ephemeral: true });
     } else {
       const remaining = list.filter(i => !i.checked);
-      groceryStore.set(userId, remaining);
+      groceryStore[userId] = remaining;
+      db.set('groceryStore', groceryStore);
       await interaction.reply({ content: `🧹 Cleared **checked items**. (${remaining.length} item(s) remaining).`, ephemeral: true });
     }
   }

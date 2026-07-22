@@ -2,6 +2,12 @@ import {
   SlashCommandBuilder, 
   EmbedBuilder 
 } from 'discord.js';
+import { XMLParser } from 'fast-xml-parser';
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: ''
+});
 
 // Helper to fetch latest video from RSS
 export async function getLatestVideo(channelId) {
@@ -9,19 +15,17 @@ export async function getLatestVideo(channelId) {
     const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`);
     const xml = await res.text();
     
-    // Extract video entries using regex
-    const entryRegex = /<entry>[\s\S]*?<yt:videoId>([^<]+)<\/yt:videoId>[\s\S]*?<title>([^<]+)<\/title>[\s\S]*?<link[^>]*?href="([^"]+)"[\s\S]*?<\/entry>/i;
-    const match = entryRegex.exec(xml);
-    
-    if (match) {
-      const videoId = match[1];
-      const title = match[2];
-      const link = match[3];
-      
-      // Attempt to get description
-      const descRegex = /<media:description>([^<]+)<\/media:description>/i;
-      const descMatch = descRegex.exec(xml);
-      const description = descMatch ? descMatch[1] : '';
+    const parsed = xmlParser.parse(xml);
+    let entry = parsed.feed?.entry;
+    if (Array.isArray(entry)) {
+      entry = entry[0];
+    }
+
+    if (entry) {
+      const videoId = entry['yt:videoId'];
+      const title = entry.title;
+      const link = entry.link?.href || `https://www.youtube.com/watch?v=${videoId}`;
+      const description = entry['media:group']?.['media:description'] || '';
 
       return {
         videoId,

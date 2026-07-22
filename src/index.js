@@ -1,5 +1,5 @@
+import 'dotenv/config';
 import { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder } from 'discord.js';
-import dotenv from 'dotenv';
 import http from 'http';
 
 import * as setupCategoryMod from './commands/setupCategoryMod.js';
@@ -29,7 +29,6 @@ import * as testAlerts from './commands/testAlerts.js';
 import { initLiveNotifier, notifierStatus } from './liveNotifier.js';
 import { getDashboardHtml } from './dashboard.js';
 
-dotenv.config();
 
 const client = new Client({
   intents: [
@@ -190,6 +189,18 @@ http.createServer((req, res) => {
       channels: client.channels.cache.size,
       status: notifierStatus
     }, null, 2));
+  } else if (req.url.startsWith('/api/toggle-command')) {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const command = url.searchParams.get('command');
+    const enabled = url.searchParams.get('enabled') === 'true';
+    if (command) {
+      toggleCommand.toggleCommandState(command, enabled);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, command, enabled }));
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Command query param missing' }));
+    }
   } else {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     const html = getDashboardHtml(client, notifierStatus);

@@ -3,9 +3,10 @@ import {
   PermissionFlagsBits, 
   EmbedBuilder 
 } from 'discord.js';
+import { db } from '../db.js';
 
-// Global memory map of disabled commands for runtime
-export const disabledCommands = new Set();
+// Global memory map of disabled commands for runtime, seeded from DB
+export const disabledCommands = new Set(db.get('disabledCommands', []));
 
 export const data = new SlashCommandBuilder()
   .setName('toggle-command')
@@ -33,15 +34,20 @@ export const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-export async function execute(interaction) {
-  const commandName = interaction.options.getString('command');
-  const enabled = interaction.options.getBoolean('enabled');
-
+export function toggleCommandState(commandName, enabled) {
   if (!enabled) {
     disabledCommands.add(commandName);
   } else {
     disabledCommands.delete(commandName);
   }
+  db.set('disabledCommands', Array.from(disabledCommands));
+}
+
+export async function execute(interaction) {
+  const commandName = interaction.options.getString('command');
+  const enabled = interaction.options.getBoolean('enabled');
+
+  toggleCommandState(commandName, enabled);
 
   const embed = new EmbedBuilder()
     .setTitle('⚙️ Command Permissions Updated')

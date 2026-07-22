@@ -1,3 +1,5 @@
+import { disabledCommands } from './commands/toggleCommand.js';
+
 function formatUptime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -12,6 +14,34 @@ export function getDashboardHtml(client, status) {
   const guilds = client.guilds.cache.size;
   const channels = client.channels.cache.size;
   const botUser = client.user;
+
+  const availableCommands = [
+    { name: 'catmod', desc: 'Category Mod Tools (/catmod)' },
+    { name: 'mod', desc: 'Server Mod Tools (/mod)' },
+    { name: 'setup-category-mod', desc: 'Setup Category Mod (/setup-category-mod)' },
+    { name: 'setup-server-mod', desc: 'Setup Server Mod (/setup-server-mod)' },
+    { name: 'mod-wizard', desc: 'Moderator Wizard (/mod-wizard)' },
+    { name: 'category-status', desc: 'Category Status (/category-status)' },
+    { name: 'automod-setup', desc: 'AutoMod Setup (/automod-setup)' }
+  ];
+
+  const commandTogglesHtml = availableCommands.map(cmd => {
+    const isEnabled = !disabledCommands.has(cmd.name);
+    return `
+      <div style="background-color: rgba(30, 41, 59, 0.4); border: 1px solid rgba(51, 65, 85, 0.3); padding: 1rem; border-radius: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-weight: 600; color: #fff; font-size: 0.9rem;">\${cmd.desc}</div>
+          <div style="font-size: 0.75rem; color: \${isEnabled ? '#34d399' : '#f87171'}; margin-top: 0.25rem;" id="status-\${cmd.name}">
+            \${isEnabled ? 'Enabled' : 'Disabled'}
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" \${isEnabled ? 'checked' : ''} onchange="toggleCommand('\${cmd.name}', this.checked)">
+          <span class="slider round"></span>
+        </label>
+      </div>
+    `;
+  }).join('');
 
   // Format log lines into terminal style
   const logLinesHtml = status.logs.length > 0
@@ -145,6 +175,53 @@ export function getDashboardHtml(client, status) {
         .bg-emerald-500 { background-color: #10b981; --tw-shadow-color: #10b981; }
         .bg-slate-600 { background-color: #475569; --tw-shadow-color: #475569; }
         .bg-red-500 { background-color: #ef4444; --tw-shadow-color: #ef4444; }
+
+        /* Interactive toggles styling */
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 44px;
+          height: 24px;
+        }
+        .switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #334155;
+          transition: .3s;
+          border-radius: 24px;
+        }
+        .slider:before {
+          position: absolute;
+          content: "";
+          height: 16px;
+          width: 16px;
+          left: 4px;
+          bottom: 4px;
+          background-color: white;
+          transition: .3s;
+          border-radius: 50%;
+        }
+        input:checked + .slider {
+          background-color: #10b981;
+        }
+        input:checked + .slider:before {
+          transform: translateX(20px);
+        }
+        .grid-toggles {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 1rem;
+          margin-bottom: 2.5rem;
+        }
       </style>
     </head>
     <body class="bg-grid">
@@ -222,6 +299,15 @@ export function getDashboardHtml(client, status) {
           ${tiktokCards}
         </div>
 
+        <!-- COMMAND CONTROL -->
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: #fff; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+          <span style="display: inline-block; width: 0.5rem; height: 1.25rem; background-color: #f59e0b; border-radius: 0.25rem;"></span>
+          Administrative Command Control
+        </h2>
+        <div class="grid-toggles">
+          ${commandTogglesHtml}
+        </div>
+
         <!-- RECENT BOT LOGGER -->
         <h2 style="font-size: 1.25rem; font-weight: 700; color: #fff; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
           <span style="display: inline-block; width: 0.5rem; height: 1.25rem; background-color: #10b981; border-radius: 0.25rem;"></span>
@@ -236,10 +322,40 @@ export function getDashboardHtml(client, status) {
         <p>Rosie Bot Status Dashboard &copy; 2026. Last Checked: ${status.lastCheckTime ? status.lastCheckTime.toLocaleTimeString() : 'Never'}</p>
       </footer>
 
-      <!-- Automatic Page Reload every 30 seconds -->
+      <!-- Toggle command state API call helper -->
       <script>
+        async function toggleCommand(commandName, enabled) {
+          try {
+            const res = await fetch(`/api/toggle-command?command=${commandName}&enabled=${enabled}`);
+            const data = await res.json();
+            if (data.success) {
+              const label = document.getElementById(`status-${commandName}`);
+              label.innerText = enabled ? 'Enabled' : 'Disabled';
+              label.style.color = enabled ? '#34d399' : '#f87171';
+            } else {
+              alert('Failed to update command state');
+            }
+          } catch (err) {
+            console.error(err);
+            alert('Error updating command state');
+          }
+        }
+      </script>
+
+      <!-- Automatic Page Reload every 30 seconds unless hovering toggles -->
+      <script>
+        let autoReload = true;
+        
+        // Pause reload when user interacts with toggles
+        document.querySelectorAll('.switch').forEach(el => {
+          el.addEventListener('mouseenter', () => autoReload = false);
+          el.addEventListener('mouseleave', () => autoReload = true);
+        });
+
         setTimeout(() => {
-          window.location.reload();
+          if (autoReload) {
+            window.location.reload();
+          }
         }, 30000);
       </script>
     </body>

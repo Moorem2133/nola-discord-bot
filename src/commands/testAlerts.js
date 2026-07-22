@@ -59,8 +59,17 @@ export const data = new SlashCommandBuilder()
       )
   );
 
-async function getAlertsChannel(interaction) {
-  const channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
+async function getAlertsChannel(interaction, platform = null, username = null) {
+  let channelId = null;
+  if (platform === 'YouTube') {
+    channelId = process.env.YOUTUBE_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+  } else if (platform === 'TikTok' && username) {
+    const envKey = `TIKTOK_${username.toUpperCase()}_CHANNEL_ID`;
+    channelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+  } else {
+    channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
+  }
+
   if (channelId) {
     try {
       const channel = await interaction.guild.channels.fetch(channelId);
@@ -74,7 +83,15 @@ async function getAlertsChannel(interaction) {
 
 export async function execute(interaction) {
   const subcommand = interaction.options.getSubcommand();
-  const channel = await getAlertsChannel(interaction);
+  let channel;
+  if (subcommand.startsWith('youtube')) {
+    channel = await getAlertsChannel(interaction, 'YouTube');
+  } else if (subcommand.startsWith('tiktok')) {
+    const tiktokUser = interaction.options.getString('channel');
+    channel = await getAlertsChannel(interaction, 'TikTok', tiktokUser);
+  } else {
+    channel = await getAlertsChannel(interaction);
+  }
 
   if (!channel) {
     return interaction.reply({ content: '❌ Could not find a suitable text channel to post the test alert.', ephemeral: true });

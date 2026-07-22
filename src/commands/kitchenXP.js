@@ -2,9 +2,10 @@ import {
   SlashCommandBuilder, 
   EmbedBuilder 
 } from 'discord.js';
+import { db } from '../db.js';
 
-// In-memory store for user XP & levels: userId -> { xp: number, level: number }
-export const userXpStore = new Map();
+// Helper to load stored XP data from DB
+const getXpStore = () => db.get('xpStore', {});
 
 // Helper to determine Chef Title based on level
 export function getChefTitle(level) {
@@ -18,7 +19,8 @@ export function getChefTitle(level) {
 }
 
 export function addXp(userId, amount = 15) {
-  const current = userXpStore.get(userId) || { xp: 0, level: 1 };
+  const xpStore = getXpStore();
+  const current = xpStore[userId] || { xp: 0, level: 1 };
   current.xp += amount;
 
   const nextLevelXp = current.level * 100;
@@ -29,7 +31,8 @@ export function addXp(userId, amount = 15) {
     leveledUp = true;
   }
 
-  userXpStore.set(userId, current);
+  xpStore[userId] = current;
+  db.set('xpStore', xpStore);
   return { ...current, leveledUp };
 }
 
@@ -50,10 +53,11 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction) {
   const subcommand = interaction.options.getSubcommand();
+  const xpStore = getXpStore();
 
   if (subcommand === 'rank') {
     const targetUser = interaction.options.getUser('user') || interaction.user;
-    const userData = userXpStore.get(targetUser.id) || { xp: 0, level: 1 };
+    const userData = xpStore[targetUser.id] || { xp: 0, level: 1 };
 
     const title = getChefTitle(userData.level);
     const nextLevelXp = userData.level * 100;
@@ -80,11 +84,12 @@ export async function execute(interaction) {
   }
 
   else if (subcommand === 'leaderboard') {
-    if (userXpStore.size === 0) {
+    const xpEntries = Object.entries(xpStore);
+    if (xpEntries.length === 0) {
       return interaction.reply('👨‍🍳 No active chef ranks recorded yet. Start chatting in channels to earn Kitchen XP!');
     }
 
-    const sorted = Array.from(userXpStore.entries())
+    const sorted = xpEntries
       .sort((a, b) => b[1].xp - a[1].xp)
       .slice(0, 10);
 

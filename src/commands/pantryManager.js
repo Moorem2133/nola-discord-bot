@@ -6,8 +6,10 @@ import {
   ButtonStyle
 } from 'discord.js';
 
-// In-memory pantry store: userId -> array of strings
-export const pantryStore = new Map();
+import { db } from '../db.js';
+
+// Helper to load pantry data from DB
+const getPantryStore = () => db.get('pantryStore', {});
 
 export const data = new SlashCommandBuilder()
   .setName('pantry')
@@ -37,13 +39,15 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
   const subcommand = interaction.options.getSubcommand();
   const userId = interaction.user.id;
-  let list = pantryStore.get(userId) || [];
+  const pantryStore = getPantryStore();
+  let list = pantryStore[userId] || [];
 
   // 1. ADD
   if (subcommand === 'add') {
     const item = interaction.options.getString('item').trim();
     list.push(item);
-    pantryStore.set(userId, list);
+    pantryStore[userId] = list;
+    db.set('pantryStore', pantryStore);
 
     const embed = new EmbedBuilder()
       .setTitle('🥫 Added to Virtual Pantry')
@@ -94,7 +98,8 @@ export async function execute(interaction) {
       // Update list
       if (list[idx]) {
         list.splice(idx, 1);
-        pantryStore.set(userId, list);
+        pantryStore[userId] = list;
+        db.set('pantryStore', pantryStore);
       }
 
       const newButtons = list.slice(0, 5).map((item, index) =>
@@ -155,7 +160,8 @@ export async function execute(interaction) {
 
   // 4. CLEAR
   else if (subcommand === 'clear') {
-    pantryStore.set(userId, []);
+    pantryStore[userId] = [];
+    db.set('pantryStore', pantryStore);
     await interaction.reply({ content: '🧹 Cleared all items from your virtual pantry.', ephemeral: true });
   }
 }

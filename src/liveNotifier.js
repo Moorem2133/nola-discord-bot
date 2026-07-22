@@ -1,5 +1,11 @@
 import { EmbedBuilder, ActivityType } from 'discord.js';
 import { ProxyAgent } from 'undici';
+import { XMLParser } from 'fast-xml-parser';
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: ''
+});
 
 // Global Status State for Dashboard
 export const notifierStatus = {
@@ -118,11 +124,13 @@ async function getYouTubeChannel(client) {
   return fetchChannelById(client, ytChannelId, 'YouTube');
 }
 
-// Helper to get target channel for TikTok alerts
-async function getTikTokChannel(client) {
-  const ttChannelId = process.env.TIKTOK_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
-  return fetchChannelById(client, ttChannelId, 'TikTok');
+// Helper to get target channel for TikTok alerts per creator
+async function getTikTokChannelForCreator(client, username) {
+  const envKey = `TIKTOK_${username.toUpperCase()}_CHANNEL_ID`;
+  const ttChannelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+  return fetchChannelById(client, ttChannelId, `TikTok (@${username})`);
 }
+
 
 // Helper to get mention prefix
 function getMentionPrefix() {
@@ -314,13 +322,16 @@ async function checkYouTubeUploads(client, channel) {
     }
     const xml = await res.text();
     
-    const entryRegex = /<entry>[\s\S]*?<yt:videoId>([^<]+)<\/yt:videoId>[\s\S]*?<title>([^<]+)<\/title>[\s\S]*?<link[^>]*?href="([^"]+)"[\s\S]*?<\/entry>/i;
-    const match = entryRegex.exec(xml);
+    const parsed = xmlParser.parse(xml);
+    let entry = parsed.feed?.entry;
+    if (Array.isArray(entry)) {
+      entry = entry[0];
+    }
     
-    if (match) {
-      const videoId = match[1];
-      const title = match[2];
-      const link = match[3];
+    if (entry) {
+      const videoId = entry['yt:videoId'];
+      const title = entry.title;
+      const link = entry.link?.href || `https://www.youtube.com/watch?v=${videoId}`;
 
       notifierStatus.youtube.lastVideoId = videoId;
 
@@ -440,6 +451,21 @@ function parseTikTokAvatar(html, username) {
   }
 }
 
+function validateTikTokHtml(html) {
+  if (html.includes('verify-g.recaptcha') || html.includes('captcha-control') || html.includes('Access Denied') || html.includes('security check')) {
+    throw new Error('Anti-bot captcha or Access Denied page detected.');
+  }
+
+  const hasSigi = html.includes('id="SIGI_STATE"');
+  const hasUniversal = html.includes('id="__UNIVERSAL_DATA_FOR_REHYDRATION__"');
+  const hasWebcast = html.includes('webcast') || html.includes('liveRoom') || html.includes('roomStatus');
+  const hasCreator = html.includes('webapp.user-detail') || html.includes('userInfo');
+
+  if (!hasSigi && !hasUniversal && !hasWebcast && !hasCreator) {
+    throw new Error('Invalid page layout (potential blank response/block).');
+  }
+}
+
 // 3. TikTok Live & Upload Check
 async function checkTikTokChannel(client, channel, username) {
   try {
@@ -451,6 +477,7 @@ async function checkTikTokChannel(client, channel, username) {
       notifierStatus.tiktok[username].lastCheckStatus = `Live Error (HTTP ${liveRes.status})`;
     } else {
       const liveText = await liveRes.text();
+      validateTikTokHtml(liveText);
       parseTikTokAvatar(liveText, username);
       const isLive = isTikTokLive(liveText);
       const wasLive = tiktokLiveStates.get(username) || false;
@@ -496,6 +523,7 @@ async function checkTikTokChannel(client, channel, username) {
       return;
     }
     const profileText = await profileRes.text();
+    validateTikTokHtml(profileText);
     parseTikTokAvatar(profileText, username);
     
     const videoRegex = /"url":"https:\/\/www\.tiktok\.com\/@[^"]+?\/video\/(\d+)"/i;
@@ -536,6 +564,7 @@ async function checkTikTokChannel(client, channel, username) {
   } catch (err) {
     console.error(`Error checking TikTok for @${username}:`, err.message);
     addStatusLog(`❌ TikTok check error for @${username}: ${err.message}`);
+    notifierStatus.tiktok[username].lastCheckStatus = `Check Error: ${err.message}`;
   }
 }
 
@@ -551,9 +580,14 @@ async function seedNotifierCache() {
       addStatusLog(`⚠️ Failed to seed YouTube RSS cache: HTTP ${ytRes.status}`);
     } else {
       const ytXml = await ytRes.text();
-      const ytMatch = /<yt:videoId>([^<]+)<\/yt:videoId>/i.exec(ytXml);
-      if (ytMatch) {
-        lastYtVideoId = ytMatch[1];
+      const parsed = xmlParser.parse(ytXml);
+      let entry = parsed.feed?.entry;
+      if (Array.isArray(entry)) {
+        entry = entry[0];
+      }
+      const videoId = entry?.['yt:videoId'];
+      if (videoId) {
+        lastYtVideoId = videoId;
         notifierStatus.youtube.lastVideoId = lastYtVideoId;
       }
     }
@@ -625,9 +659,9 @@ export async function initLiveNotifier(client) {
       await checkYouTubeUploads(client, ytChannel);
     }
     
-    const ttChannel = await getTikTokChannel(client);
-    if (ttChannel) {
-      for (const username of TIKTOK_CHANNELS) {
+    for (const username of TIKTOK_CHANNELS) {
+      const ttChannel = await getTikTokChannelForCreator(client, username);
+      if (ttChannel) {
         await checkTikTokChannel(client, ttChannel, username);
       }
     }
