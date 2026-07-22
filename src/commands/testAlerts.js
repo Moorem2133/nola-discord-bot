@@ -59,15 +59,23 @@ export const data = new SlashCommandBuilder()
       )
   );
 
+const FALLBACK_CHANNELS = {
+  YOUTUBE: '1529511448919674921',          // #nola-live-notifications
+  nola_chef: '1529511448919674921',        // #nola-live-notifications
+  munchy_munchdowns: '1529511448919674921', // #nola-live-notifications
+  michaelmoore286: '1529511760917303326',   // #michael-live-notifications
+  DEFAULT: '1529511448919674921'           // #nola-live-notifications
+};
+
 async function getAlertsChannel(interaction, platform = null, username = null) {
   let channelId = null;
   if (platform === 'YouTube') {
-    channelId = process.env.YOUTUBE_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+    channelId = process.env.YOUTUBE_NOTIFY_CHANNEL_ID || FALLBACK_CHANNELS.YOUTUBE;
   } else if (platform === 'TikTok' && username) {
     const envKey = `TIKTOK_${username.toUpperCase()}_CHANNEL_ID`;
-    channelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+    channelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || FALLBACK_CHANNELS[username] || process.env.LIVE_NOTIFY_CHANNEL_ID;
   } else {
-    channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
+    channelId = process.env.LIVE_NOTIFY_CHANNEL_ID || FALLBACK_CHANNELS.DEFAULT;
   }
 
   if (channelId) {

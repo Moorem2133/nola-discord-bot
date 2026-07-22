@@ -118,16 +118,25 @@ async function fetchChannelById(client, channelId, platformName) {
   return channel;
 }
 
+// Hardcoded fallback channel mappings if environment variables are not set on Render
+const FALLBACK_CHANNELS = {
+  YOUTUBE: '1529511448919674921',          // #nola-live-notifications
+  nola_chef: '1529511448919674921',        // #nola-live-notifications
+  munchy_munchdowns: '1529511448919674921', // #nola-live-notifications
+  michaelmoore286: '1529511760917303326',   // #michael-live-notifications
+  DEFAULT: '1529511448919674921'           // #nola-live-notifications
+};
+
 // Helper to get target channel for YouTube alerts
 async function getYouTubeChannel(client) {
-  const ytChannelId = process.env.YOUTUBE_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+  const ytChannelId = process.env.YOUTUBE_NOTIFY_CHANNEL_ID || FALLBACK_CHANNELS.YOUTUBE;
   return fetchChannelById(client, ytChannelId, 'YouTube');
 }
 
 // Helper to get target channel for TikTok alerts per creator
 async function getTikTokChannelForCreator(client, username) {
   const envKey = `TIKTOK_${username.toUpperCase()}_CHANNEL_ID`;
-  const ttChannelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || process.env.LIVE_NOTIFY_CHANNEL_ID;
+  const ttChannelId = process.env[envKey] || process.env.TIKTOK_NOTIFY_CHANNEL_ID || FALLBACK_CHANNELS[username] || process.env.LIVE_NOTIFY_CHANNEL_ID;
   return fetchChannelById(client, ttChannelId, `TikTok (@${username})`);
 }
 
