@@ -40,7 +40,7 @@ export async function handleTicketInteraction(interaction) {
   const user = interaction.user;
 
   if (interaction.customId === 'open_support_ticket') {
-    const channelName = `ticket-${user.username}`.toLowerCase().replace(/[^a-z0-0-]/g, '');
+    const channelName = `ticket-${user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
     // Check if ticket channel already exists
     const existing = guild.channels.cache.find(c => c.name === channelName);

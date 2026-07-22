@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Collection, ActivityType } from 'discord.js';
+import { Client, GatewayIntentBits, Collection, ActivityType, EmbedBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import http from 'http';
 
