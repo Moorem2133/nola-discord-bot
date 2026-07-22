@@ -43,22 +43,31 @@ async function fetchWithProxy(url, options = {}) {
 // Helper to get target channel for alerts
 async function getAlertsChannel(client) {
   const channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
+  let channel = null;
   if (channelId) {
     try {
-      const channel = await client.channels.fetch(channelId);
-      if (channel) return channel;
+      channel = await client.channels.fetch(channelId);
     } catch (err) {
       console.warn(`⚠️ Failed to fetch live alerts channel (${channelId}):`, err.message);
     }
   }
   
-  // Fallbacks: find text channel named 'live-alerts', 'announcements', or 'general-chat'
-  const fallback = client.channels.cache.find(c => 
-    c.isTextBased() && 
-    (c.name === 'live-alerts' || c.name === 'announcements' || c.name === 'general-chat')
-  );
+  if (!channel) {
+    // Fallbacks: find text channel named 'live-alerts', 'announcements', or 'general-chat'
+    const fallback = client.channels.cache.find(c => 
+      c.isTextBased() && 
+      (c.name === 'live-alerts' || c.name === 'announcements' || c.name === 'general-chat')
+    );
+    channel = fallback || client.channels.cache.find(c => c.isTextBased());
+  }
   
-  return fallback || client.channels.cache.find(c => c.isTextBased());
+  if (channel) {
+    console.log(`📢 Alerts channel resolved to: #${channel.name} (Guild: ${channel.guild?.name || 'DM / Unknown'})`);
+  } else {
+    console.warn('⚠️ No text channel found to post YouTube/TikTok live notifications.');
+  }
+  
+  return channel;
 }
 
 // 1. YouTube Live Check
