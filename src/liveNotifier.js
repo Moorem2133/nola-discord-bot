@@ -70,7 +70,7 @@ async function checkYouTubeLive(client, channel) {
         .setFooter({ text: 'Chef Chris Cody\'s Kitchen Live Alert' })
         .setTimestamp();
 
-      await channel.send({ content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${res.url}`, embeds: [embed] }).catch(() => {});
+      await channel.send({ content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${res.url}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send YouTube live alert to Discord:', err));
     } else if (!isLive && ytIsLive) {
       ytIsLive = false;
       console.log('🔴 YouTube Live stream ended.');
@@ -109,7 +109,7 @@ async function checkYouTubeUploads(client, channel) {
           .setFooter({ text: 'Chef Chris Cody\'s Kitchen YouTube' })
           .setTimestamp();
 
-        await channel.send({ content: `🔔 **New Video Alert!** Chef Chris Cody has posted a new video! @everyone\n${link}`, embeds: [embed] }).catch(() => {});
+        await channel.send({ content: `🔔 **New Video Alert!** Chef Chris Cody has posted a new video! @everyone\n${link}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send YouTube upload alert to Discord:', err));
       }
       lastYtVideoId = videoId;
     }
@@ -191,7 +191,7 @@ async function checkTikTokChannel(client, channel, username) {
           .setFooter({ text: 'TikTok Live Alert' })
           .setTimestamp();
 
-        await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! @here\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch(() => {});
+        await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! @here\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send TikTok live alert to Discord:', err));
       } else if (!isLive && wasLive) {
         tiktokLiveStates.set(username, false);
         console.log(`🔴 TikTok user @${username} live stream ended.`);
@@ -225,7 +225,7 @@ async function checkTikTokChannel(client, channel, username) {
           .setFooter({ text: 'TikTok Upload Alert' })
           .setTimestamp();
 
-        await channel.send({ content: `🔔 **New TikTok Post!** Check out the latest video from **@${username}**!\n${videoLink}`, embeds: [embed] }).catch(() => {});
+        await channel.send({ content: `🔔 **New TikTok Post!** Check out the latest video from **@${username}**!\n${videoLink}`, embeds: [embed] }).catch((err) => console.error('❌ Failed to send TikTok upload alert to Discord:', err));
       }
       tiktokLastVideoIds.set(username, videoId);
     } else {
