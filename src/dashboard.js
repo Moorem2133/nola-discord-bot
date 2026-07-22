@@ -326,10 +326,10 @@ export function getDashboardHtml(client, status) {
       <script>
         async function toggleCommand(commandName, enabled) {
           try {
-            const res = await fetch(`/api/toggle-command?command=${commandName}&enabled=${enabled}`);
+            const res = await fetch(\`/api/toggle-command?command=\${commandName}&enabled=\${enabled}\`);
             const data = await res.json();
             if (data.success) {
-              const label = document.getElementById(`status-${commandName}`);
+              const label = document.getElementById(\`status-\${commandName}\`);
               label.innerText = enabled ? 'Enabled' : 'Disabled';
               label.style.color = enabled ? '#34d399' : '#f87171';
             } else {
