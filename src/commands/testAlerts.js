@@ -59,18 +59,22 @@ export const data = new SlashCommandBuilder()
       )
   );
 
-function getAlertsChannel(interaction) {
+async function getAlertsChannel(interaction) {
   const channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
   if (channelId) {
-    const channel = interaction.guild.channels.cache.get(channelId);
-    if (channel) return channel;
+    try {
+      const channel = await interaction.guild.channels.fetch(channelId);
+      if (channel) return channel;
+    } catch (err) {
+      console.warn(`⚠️ Failed to fetch alerts channel (${channelId}):`, err.message);
+    }
   }
   return interaction.channel;
 }
 
 export async function execute(interaction) {
   const subcommand = interaction.options.getSubcommand();
-  const channel = getAlertsChannel(interaction);
+  const channel = await getAlertsChannel(interaction);
 
   if (!channel) {
     return interaction.reply({ content: '❌ Could not find a suitable text channel to post the test alert.', ephemeral: true });

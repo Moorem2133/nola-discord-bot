@@ -17,11 +17,15 @@ const HEADERS = {
 };
 
 // Helper to get target channel for alerts
-function getAlertsChannel(client) {
+async function getAlertsChannel(client) {
   const channelId = process.env.LIVE_NOTIFY_CHANNEL_ID;
   if (channelId) {
-    const channel = client.channels.cache.get(channelId);
-    if (channel) return channel;
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (channel) return channel;
+    } catch (err) {
+      console.warn(`⚠️ Failed to fetch live alerts channel (${channelId}):`, err.message);
+    }
   }
   
   // Fallbacks: find text channel named 'live-alerts', 'announcements', or 'general-chat'
@@ -36,29 +40,37 @@ function getAlertsChannel(client) {
 // 1. YouTube Live Check
 async function checkYouTubeLive(client, channel) {
   try {
-    const res = await fetch(`https://www.youtube.com/channel/${YT_CHANNEL_ID}/live`, { headers: HEADERS });
-    const text = await res.text();
+    const res = await fetch(`https://www.youtube.com/channel/${YT_CHANNEL_ID}/live`, { 
+      headers: HEADERS,
+      redirect: 'follow' 
+    });
     
-    const isLive = text.includes('hlsManifestUrl') || text.includes('"isLive":true') || text.includes('liveStreamabilityRenderer');
+    if (!res.ok) {
+      console.warn(`⚠️ YouTube Live Check failed: HTTP status ${res.status}`);
+      return;
+    }
+    
+    const isLive = res.url.includes('/watch?v=') || res.url.includes('/v/');
     
     if (isLive && !ytIsLive) {
       ytIsLive = true;
-      console.log('📢 YouTube Channel is LIVE!');
+      console.log(`📢 YouTube Channel is LIVE! URL: ${res.url}`);
       
+      const text = await res.text();
       // Extract title if possible
-      const titleMatch = /<meta name="title" content="([^"]+)"/i.exec(text);
+      const titleMatch = /<meta name="title" content="([^"]+)"/i.exec(text) || /<title>([^<]+)<\/title>/i.exec(text);
       const title = titleMatch ? titleMatch[1] : 'Chef Chris Cody is LIVE on YouTube!';
 
       const embed = new EmbedBuilder()
         .setTitle(`🔴 LIVE NOW: ${title}`)
-        .setURL(`https://www.youtube.com/channel/${YT_CHANNEL_ID}/live`)
+        .setURL(res.url)
         .setColor('#ff0000')
         .setDescription('Chef Chris Cody is streaming live! Join the stream and chat in real-time.')
         .setThumbnail(`https://img.youtube.com/vi/live/hqdefault.jpg`)
         .setFooter({ text: 'Chef Chris Cody\'s Kitchen Live Alert' })
         .setTimestamp();
 
-      await channel.send({ content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\nhttps://www.youtube.com/channel/${YT_CHANNEL_ID}/live`, embeds: [embed] }).catch(() => {});
+      await channel.send({ content: `📢 **Chef Chris Cody** is LIVE on YouTube! @here\n${res.url}`, embeds: [embed] }).catch(() => {});
     } else if (!isLive && ytIsLive) {
       ytIsLive = false;
       console.log('🔴 YouTube Live stream ended.');
@@ -72,6 +84,10 @@ async function checkYouTubeLive(client, channel) {
 async function checkYouTubeUploads(client, channel) {
   try {
     const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${YT_CHANNEL_ID}`, { headers: HEADERS });
+    if (!res.ok) {
+      console.warn(`⚠️ YouTube Upload RSS check failed: HTTP status ${res.status}`);
+      return;
+    }
     const xml = await res.text();
     
     const entryRegex = /<entry>[\s\S]*?<yt:videoId>([^<]+)<\/yt:videoId>[\s\S]*?<title>([^<]+)<\/title>[\s\S]*?<link[^>]*?href="([^"]+)"[\s\S]*?<\/entry>/i;
@@ -156,31 +172,38 @@ async function checkTikTokChannel(client, channel, username) {
   try {
     // A. Check LIVE status
     const liveRes = await fetch(`https://www.tiktok.com/@${username}/live`, { headers: HEADERS });
-    const liveText = await liveRes.text();
-    
-    const isLive = isTikTokLive(liveText);
-    const wasLive = tiktokLiveStates.get(username) || false;
+    if (!liveRes.ok) {
+      console.warn(`⚠️ TikTok Live Check for @${username} failed: HTTP status ${liveRes.status}`);
+    } else {
+      const liveText = await liveRes.text();
+      const isLive = isTikTokLive(liveText);
+      const wasLive = tiktokLiveStates.get(username) || false;
 
-    if (isLive && !wasLive) {
-      tiktokLiveStates.set(username, true);
-      console.log(`📢 TikTok user @${username} is LIVE!`);
-      
-      const embed = new EmbedBuilder()
-        .setTitle(`🔴 LIVE NOW ON TIKTOK: @${username}`)
-        .setURL(`https://www.tiktok.com/@${username}/live`)
-        .setColor('#fe2c55')
-        .setDescription(`@${username} is streaming live on TikTok! Tune in and watch!`)
-        .setFooter({ text: 'TikTok Live Alert' })
-        .setTimestamp();
+      if (isLive && !wasLive) {
+        tiktokLiveStates.set(username, true);
+        console.log(`📢 TikTok user @${username} is LIVE!`);
+        
+        const embed = new EmbedBuilder()
+          .setTitle(`🔴 LIVE NOW ON TIKTOK: @${username}`)
+          .setURL(`https://www.tiktok.com/@${username}/live`)
+          .setColor('#fe2c55')
+          .setDescription(`@${username} is streaming live on TikTok! Tune in and watch!`)
+          .setFooter({ text: 'TikTok Live Alert' })
+          .setTimestamp();
 
-      await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! @here\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch(() => {});
-    } else if (!isLive && wasLive) {
-      tiktokLiveStates.set(username, false);
-      console.log(`🔴 TikTok user @${username} live stream ended.`);
+        await channel.send({ content: `📢 **@${username}** is LIVE on TikTok! @here\nhttps://www.tiktok.com/@${username}/live`, embeds: [embed] }).catch(() => {});
+      } else if (!isLive && wasLive) {
+        tiktokLiveStates.set(username, false);
+        console.log(`🔴 TikTok user @${username} live stream ended.`);
+      }
     }
 
     // B. Check Upload status
     const profileRes = await fetch(`https://www.tiktok.com/@${username}`, { headers: HEADERS });
+    if (!profileRes.ok) {
+      console.warn(`⚠️ TikTok Profile Check for @${username} failed: HTTP status ${profileRes.status}`);
+      return;
+    }
     const profileText = await profileRes.text();
     
     const videoRegex = /"url":"https:\/\/www\.tiktok\.com\/@[^"]+?\/video\/(\d+)"/i;
@@ -205,6 +228,8 @@ async function checkTikTokChannel(client, channel, username) {
         await channel.send({ content: `🔔 **New TikTok Post!** Check out the latest video from **@${username}**!\n${videoLink}`, embeds: [embed] }).catch(() => {});
       }
       tiktokLastVideoIds.set(username, videoId);
+    } else {
+      console.warn(`⚠️ Could not find any video links in profile HTML for TikTok user @${username}. This usually means the page was served without video data (anti-bot protection).`);
     }
   } catch (err) {
     console.error(`Error checking TikTok for @${username}:`, err.message);
@@ -216,22 +241,32 @@ async function seedNotifierCache() {
   try {
     // Seed YouTube
     const ytRes = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${YT_CHANNEL_ID}`, { headers: HEADERS });
-    const ytXml = await ytRes.text();
-    const ytMatch = /<yt:videoId>([^<]+)<\/yt:videoId>/i.exec(ytXml);
-    if (ytMatch) {
-      lastYtVideoId = ytMatch[1];
+    if (!ytRes.ok) {
+      console.warn(`⚠️ Failed to seed YouTube cache: HTTP status ${ytRes.status}`);
+    } else {
+      const ytXml = await ytRes.text();
+      const ytMatch = /<yt:videoId>([^<]+)<\/yt:videoId>/i.exec(ytXml);
+      if (ytMatch) {
+        lastYtVideoId = ytMatch[1];
+      }
     }
     
     // Seed TikTok
     for (const username of TIKTOK_CHANNELS) {
       const ttRes = await fetch(`https://www.tiktok.com/@${username}`, { headers: HEADERS });
+      if (!ttRes.ok) {
+        console.warn(`⚠️ Failed to seed TikTok cache for @${username}: HTTP status ${ttRes.status}`);
+        continue;
+      }
       const ttText = await ttRes.text();
       const ttMatch = /"url":"https:\/\/www\.tiktok\.com\/@[^"]+?\/video\/(\d+)"/i.exec(ttText);
       if (ttMatch) {
         tiktokLastVideoIds.set(username, ttMatch[1]);
+      } else {
+        console.warn(`⚠️ Could not find video URL to seed cache for TikTok user @${username}.`);
       }
     }
-    console.log('🚀 Live Notifier Cache seeded successfully.');
+    console.log('🚀 Live Notifier Cache seeding complete.');
   } catch (err) {
     console.error('Failed to seed live notifier cache:', err.message);
   }
@@ -246,7 +281,7 @@ export async function initLiveNotifier(client) {
   const INTERVAL_MS = 10 * 60 * 1000;
   
   async function runChecks() {
-    const channel = getAlertsChannel(client);
+    const channel = await getAlertsChannel(client);
     if (!channel) {
       console.warn('⚠️ No text channel found to post YouTube/TikTok live notifications.');
       return;
